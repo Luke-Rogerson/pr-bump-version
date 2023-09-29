@@ -1,0 +1,61 @@
+name: "Bump version from PR title"
+description: "Reads most recent release version from GitHub and bumps it based on PR title (patch, minor, major)"
+inputs:
+  is-release:
+    description: "Whether the event is a release event. If true, the version will not be suffixed with the commit hash"
+    required: false
+    default: "false"
+outputs:
+  version:
+    description: "The calculated version"
+    value: "${{ steps.finalise_version.outputs.version }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract PR title
+      id: extract_title
+      run: |
+        TITLE="${{ github.event.pull_request.title }}"
+        echo "PR title: $TITLE"
+        echo "pr_title=$TITLE" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Determine Version Increment
+      id: version_increment
+      run: |
+        TITLE=$(echo "${{ env.pr_title }}" | awk '{print tolower($0)}')
+        echo "Lowercased PR title: $TITLE"
+
+        if [[ $TITLE == patch* ]]; then
+          increment="patch"
+        elif [[ $TITLE == minor* ]]; then
+          increment="minor"
+        elif [[ $TITLE == major* ]]; then
+          increment="major"
+        else
+          echo "Invalid PR title. Exiting."
+          exit 1
+        fi
+
+        echo "increment=$increment" >> $GITHUB_ENV
+      shell: bash
+
+    - uses: rickstaa/action-get-semver@v1
+      id: get_semver
+      with:
+        bump_level: "${{ env.increment }}"
+
+    - name: Finalise version
+      id: finalise_version
+      run: |
+        COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c1-7)
+        VERSION="${{ steps.get_semver.outputs.next_version }}-$COMMIT_HASH"
+
+        if [[ "${{ inputs.is-release }}" == "true" ]]; then
+          VERSION="${{ steps.get_semver.outputs.next_version }}"
+        fi
+
+        echo "Outputted version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+      shell: bash
