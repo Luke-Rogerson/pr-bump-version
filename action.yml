@@ -1,10 +1,13 @@
 name: "Bump version from PR title"
-description: "Reads most recent release version from GitHub and bumps it based on PR title (patch, minor, major)"
+description: "Reads most recent release version from GitHub and bumps it based on PR title (patch, minor, major). Uses open PR title if not on main/master branch, otherwise uses most recent merged PR title."
 inputs:
   is-release:
     description: "Whether the event is a release event. If true, the version will not be suffixed with the commit hash"
     required: false
     default: "false"
+  github-token:
+    description: "The GitHub token to use for fetching the most recently merged PR title"
+    required: true
 outputs:
   version:
     description: "The calculated version"
@@ -13,7 +16,31 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Extract PR title
+    - name: Check if on master/main branch
+      id: check_branch
+      run: |
+        BRANCH="${{ github.ref_name }}"
+        echo "Current branch: $BRANCH"
+        if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
+          echo "on_main_or_master=true" >> $GITHUB_ENV
+        else
+          echo "on_main_or_master=false" >> $GITHUB_ENV
+        fi
+      shell: bash
+
+    - name: Get the most recent PR title (if on main/master branch)
+      if: env.on_main_or_master == 'true'
+      id: get_recent_pr_title
+      run: |
+        PR_TITLE=$(curl -s -H "Authorization: token ${{ inputs.github-token }}" \
+            https://api.github.com/repos/${{ github.repository }}/pulls?state=closed | \
+            jq -r '[.[] | select(.merged_at != null)][0].title')
+          echo "Merged PR title: $PR_TITLE"
+          echo "pr_title=$PR_TITLE" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Extract PR title (if not on main/master branch)
+      if: env.on_main_or_master == 'false'
       id: extract_title
       run: |
         TITLE="${{ github.event.pull_request.title }}"
